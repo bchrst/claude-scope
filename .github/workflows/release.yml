@@ -15,6 +15,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Check the tag matches Cargo.toml and CHANGELOG.md
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          package_version="$(cargo pkgid | sed 's/.*[#@]//')"
+          if [ "$package_version" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml's version, $package_version"
+            exit 1
+          fi
+          if ! grep -q "^## $version " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version - <date>' entry"
+            exit 1
+          fi
       - run: cargo test
       - run: cargo clippy -- -D warnings
       - run: cargo fmt -- --check
@@ -53,20 +66,30 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../claude-vault-${{ matrix.target }}.tar.gz claude-vault
+          tar czf ../../../claude-scope-${{ matrix.target }}.tar.gz claude-scope
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-vault-${{ matrix.target }}
-          path: claude-vault-${{ matrix.target }}.tar.gz
+          name: claude-scope-${{ matrix.target }}
+          path: claude-scope-${{ matrix.target }}.tar.gz
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Take the release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          awk -v heading="## ${GITHUB_REF_NAME#v} " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found
+          ' CHANGELOG.md > release-notes.md
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: claude-vault-*.tar.gz
+          body_path: release-notes.md
+          files: claude-scope-*.tar.gz
           generate_release_notes: true
